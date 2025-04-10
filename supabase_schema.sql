@@ -11,10 +11,10 @@ CREATE TABLE user_roles (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Insert default user roles
+-- Insert default user roles (chỉ giữ admin và creator)
 INSERT INTO user_roles (name, description) VALUES
   ('admin', 'Full access to all system features'),
-  ('creator', 'Can create and manage their own content');
+  ('creator', 'Can create and manage content');
 
 -- Content status enum table
 CREATE TABLE content_statuses (
@@ -31,7 +31,7 @@ INSERT INTO content_statuses (name, description) VALUES
   ('published', 'Content that is live and publicly visible'),
   ('archived', 'Content that has been removed from public view');
 
--- Author type enum table for polymorphic relationships
+-- Author type enum table for polymorphic relationships (chỉ giữ team_member)
 CREATE TABLE author_types (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(20) NOT NULL UNIQUE,
@@ -39,10 +39,9 @@ CREATE TABLE author_types (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Insert default author types
+-- Insert default author types (chỉ còn team_member)
 INSERT INTO author_types (name, description) VALUES
-  ('team_member', 'Author is a team member of the agency'),
-  ('user', 'Author is a registered user of the system');
+  ('team_member', 'Author is a team member of the agency');
 
 -- Contact submission status enum table
 CREATE TABLE submission_statuses (
@@ -76,7 +75,7 @@ INSERT INTO action_types (name, description) VALUES
   ('unpublish', 'Resource was unpublished'),
   ('archive', 'Resource was archived');
 
--- USERS TABLE
+-- USERS TABLE (chỉ có admin và creator)
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   email VARCHAR(255) NOT NULL UNIQUE,
@@ -223,12 +222,10 @@ CREATE TABLE blog_posts (
   published_at TIMESTAMPTZ
 );
 
--- Add check constraint to ensure author_id points to a valid table based on author_type_id
+-- Sửa lại ràng buộc cho blog_posts để chỉ có team_member làm tác giả
 ALTER TABLE blog_posts ADD CONSTRAINT valid_author_reference CHECK (
-  (author_type_id IN (SELECT id FROM author_types WHERE name = 'team_member') AND
-   author_id IN (SELECT id FROM team_members)) OR
-  (author_type_id IN (SELECT id FROM author_types WHERE name = 'user') AND
-   author_id IN (SELECT id FROM users))
+  author_type_id IN (SELECT id FROM author_types WHERE name = 'team_member') AND
+  author_id IN (SELECT id FROM team_members)
 );
 
 CREATE INDEX idx_blog_posts_slug ON blog_posts(slug);
@@ -275,7 +272,7 @@ CREATE INDEX idx_testimonials_is_published ON testimonials(is_published);
 CREATE INDEX idx_testimonials_project_id ON testimonials(project_id);
 CREATE INDEX idx_testimonials_created_by ON testimonials(created_by_user_id);
 
--- CONTACT SUBMISSIONS TABLE
+-- CONTACT SUBMISSIONS TABLE (duy nhất bảng này người dùng thông thường có thể tương tác)
 CREATE TABLE contact_submissions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(100) NOT NULL,
@@ -315,27 +312,22 @@ CREATE INDEX idx_activity_logs_entity_id ON activity_logs(entity_id);
 CREATE INDEX idx_activity_logs_action_type_id ON activity_logs(action_type_id);
 CREATE INDEX idx_activity_logs_created_at ON activity_logs(created_at);
 
--- Function to get the author name from either team_members or users table
+-- Function to get the author name from team_members table
 CREATE OR REPLACE FUNCTION get_blog_author_name(post_id UUID)
 RETURNS TEXT AS $$
 DECLARE
   author_name TEXT;
-  author_type_name TEXT;
-  author_uuid UUID;
+  author_id UUID;
 BEGIN
-  -- Get the author type and id
-  SELECT bp.author_type_id, bp.author_id, at.name 
-  INTO author_uuid, author_name, author_type_name
+  -- Get the author id
+  SELECT bp.author_id INTO author_id
   FROM blog_posts bp
-  JOIN author_types at ON bp.author_type_id = at.id
   WHERE bp.id = post_id;
   
-  -- Return the author name based on the type
-  IF author_type_name = 'team_member' THEN
-    SELECT tm.name INTO author_name FROM team_members tm WHERE tm.id = author_uuid;
-  ELSIF author_type_name = 'user' THEN
-    SELECT CONCAT(u.first_name, ' ', u.last_name) INTO author_name FROM users u WHERE u.id = author_uuid;
-  END IF;
+  -- Get author name from team_members
+  SELECT tm.name INTO author_name 
+  FROM team_members tm 
+  WHERE tm.id = author_id;
   
   RETURN author_name;
 END;
@@ -386,7 +378,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- VIEW: Comprehensive Blog Posts View
+-- VIEW: Comprehensive Blog Posts View (cập nhật để chỉ hiển thị team_member)
 CREATE VIEW view_blog_posts AS
 SELECT 
   bp.id,
@@ -398,11 +390,7 @@ SELECT
   bp.author_id,
   bp.author_type_id,
   at.name AS author_type,
-  CASE 
-    WHEN at.name = 'team_member' THEN (SELECT tm.name FROM team_members tm WHERE tm.id = bp.author_id)
-    WHEN at.name = 'user' THEN (SELECT CONCAT(u.first_name, ' ', u.last_name) FROM users u WHERE u.id = bp.author_id)
-    ELSE 'Unknown'
-  END AS author_name,
+  (SELECT tm.name FROM team_members tm WHERE tm.id = bp.author_id) AS author_name,
   bp.meta_title,
   bp.meta_description,
   bp.is_published,
@@ -668,16 +656,6 @@ CREATE POLICY "Admins can CRUD all blog posts" ON blog_posts
     )
   );
 
--- Add policy for user authors
-CREATE POLICY "User authors can edit their authored blog posts" ON blog_posts
-  FOR UPDATE USING (
-    auth.uid() = author_id AND 
-    EXISTS (
-      SELECT 1 FROM author_types at
-      WHERE blog_posts.author_type_id = at.id AND at.name = 'user'
-    )
-  );
-
 -- Projects policies
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Anyone can view published projects" ON projects 
@@ -700,7 +678,9 @@ CREATE POLICY "Admins can CRUD all projects" ON projects
 
 -- Contact submissions policies
 ALTER TABLE contact_submissions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Public can insert contact submissions" ON contact_submissions FOR INSERT WITH CHECK (true);
+-- Cho phép bất kỳ ai cũng có thể gửi form liên hệ
+CREATE POLICY "Anyone can submit contact form" ON contact_submissions FOR INSERT WITH CHECK (true);
+-- Chỉ admin/creator mới có thể xem và cập nhật thông tin liên hệ
 CREATE POLICY "Admins can view and update all submissions" ON contact_submissions 
   FOR ALL USING (
     EXISTS (
@@ -709,7 +689,36 @@ CREATE POLICY "Admins can view and update all submissions" ON contact_submission
       WHERE u.id = auth.uid() AND r.name = 'admin'
     )
   );
-CREATE POLICY "Creators can view and update assigned submissions" ON contact_submissions 
-  FOR SELECT USING (assigned_to_user_id = auth.uid());
+CREATE POLICY "Creators can view assigned submissions" ON contact_submissions 
+  FOR SELECT USING (
+    assigned_to_user_id = auth.uid() AND
+    EXISTS (
+      SELECT 1 FROM users u
+      JOIN user_roles r ON u.role_id = r.id
+      WHERE u.id = auth.uid() AND r.name = 'creator'
+    )
+  );
 CREATE POLICY "Creators can update assigned submissions" ON contact_submissions 
-  FOR UPDATE USING (assigned_to_user_id = auth.uid()); 
+  FOR UPDATE USING (
+    assigned_to_user_id = auth.uid() AND
+    EXISTS (
+      SELECT 1 FROM users u
+      JOIN user_roles r ON u.role_id = r.id
+      WHERE u.id = auth.uid() AND r.name = 'creator'
+    )
+  );
+
+-- Testimonials policies
+ALTER TABLE testimonials ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Anyone can view published testimonials" ON testimonials
+  FOR SELECT USING (is_published = true);
+CREATE POLICY "Creators can manage their own testimonials" ON testimonials
+  FOR ALL USING (created_by_user_id = auth.uid());
+CREATE POLICY "Admins can manage all testimonials" ON testimonials
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM users u
+      JOIN user_roles r ON u.role_id = r.id
+      WHERE u.id = auth.uid() AND r.name = 'admin'
+    )
+  ); 

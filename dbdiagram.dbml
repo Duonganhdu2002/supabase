@@ -26,7 +26,7 @@ Table submission_statuses {
 // Author type enum for polymorphic relationship
 Table author_types {
   id uuid [pk]
-  name varchar(20) [unique, not null, note: "team_member, user"]
+  name varchar(20) [unique, not null, note: "team_member"]
   description text
   created_at timestamp
 }
@@ -153,8 +153,8 @@ Table blog_posts {
   summary text [not null]
   content text [not null]
   featured_image_url text
-  author_id uuid [note: "FK to either team_members.id or users.id depending on author_type_id"]
-  author_type_id uuid [ref: > author_types.id, not null, note: "Determines if author_id points to team_members or users"]
+  author_id uuid [note: "FK to team_members.id"]
+  author_type_id uuid [ref: > author_types.id, not null, note: "Always team_members"]
   meta_title varchar(100)
   meta_description varchar(160)
   is_published boolean [default: true]
