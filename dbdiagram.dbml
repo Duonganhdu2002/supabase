@@ -1,0 +1,379 @@
+// Creative Agency Database Schema
+// DBML format for dbdiagram.io
+
+// Enum Tables
+Table user_roles {
+  id uuid [pk]
+  name varchar(20) [unique, not null, note: "admin, creator"]
+  description text
+  created_at timestamp
+}
+
+Table content_statuses {
+  id uuid [pk]
+  name varchar(20) [unique, not null, note: "draft, review, published, archived"]
+  description text
+  created_at timestamp
+}
+
+Table submission_statuses {
+  id uuid [pk]
+  name varchar(20) [unique, not null, note: "unread, read, responded, archived"]
+  description text
+  created_at timestamp
+}
+
+// Author type enum for polymorphic relationship
+Table author_types {
+  id uuid [pk]
+  name varchar(20) [unique, not null, note: "team_member, user"]
+  description text
+  created_at timestamp
+}
+
+// Action type enum for activity logs
+Table action_types {
+  id uuid [pk]
+  name varchar(20) [unique, not null, note: "create, update, delete, publish, unpublish, archive"]
+  description text
+  created_at timestamp
+}
+
+// Users & Team Members
+Table users {
+  id uuid [pk]
+  email varchar(255) [unique, not null]
+  first_name varchar(100)
+  last_name varchar(100)
+  role_id uuid [ref: > user_roles.id, not null]
+  avatar_url text
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    email
+    role_id
+  }
+}
+
+Table team_members {
+  id uuid [pk]
+  name varchar(100) [not null]
+  role varchar(100) [not null]
+  bio text
+  avatar_url text
+  email varchar(255)
+  social_links jsonb
+  is_published boolean [default: true]
+  sort_order smallint [default: 0]
+  user_id uuid [ref: > users.id]
+  created_by_user_id uuid [ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    is_published
+    user_id
+    created_by_user_id
+  }
+}
+
+// Content Organization
+Table tags {
+  id uuid [pk]
+  name varchar(50) [unique, not null]
+  slug varchar(50) [unique, not null]
+  created_by_user_id uuid [ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    slug
+    created_by_user_id
+  }
+}
+
+Table services {
+  id uuid [pk]
+  name varchar(100) [not null]
+  slug varchar(100) [unique, not null]
+  description text [not null]
+  icon varchar(50)
+  is_published boolean [default: true]
+  sort_order smallint [default: 0]
+  created_by_user_id uuid [ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    slug
+    is_published
+    created_by_user_id
+  }
+}
+
+// Content Tables
+Table projects {
+  id uuid [pk]
+  title varchar(100) [not null]
+  slug varchar(100) [unique, not null]
+  summary text [not null]
+  content text [not null]
+  client_name varchar(100)
+  completed_date date
+  featured_image_url text
+  gallery_images jsonb
+  meta_title varchar(100)
+  meta_description varchar(160)
+  is_published boolean [default: true]
+  is_featured boolean [default: false]
+  sort_order smallint [default: 0]
+  status_id uuid [ref: > content_statuses.id, not null]
+  locale varchar(10) [default: 'en']
+  structured_data jsonb
+  created_by_user_id uuid [ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    slug
+    is_published
+    is_featured
+    status_id
+    created_at
+    locale
+    created_by_user_id
+  }
+}
+
+Table blog_posts {
+  id uuid [pk]
+  title varchar(100) [not null]
+  slug varchar(100) [unique, not null]
+  summary text [not null]
+  content text [not null]
+  featured_image_url text
+  author_id uuid [note: "FK to either team_members.id or users.id depending on author_type_id"]
+  author_type_id uuid [ref: > author_types.id, not null, note: "Determines if author_id points to team_members or users"]
+  meta_title varchar(100)
+  meta_description varchar(160)
+  is_published boolean [default: true]
+  is_featured boolean [default: false]
+  status_id uuid [ref: > content_statuses.id, not null]
+  locale varchar(10) [default: 'en']
+  structured_data jsonb
+  reading_time smallint
+  created_by_user_id uuid [ref: > users.id, not null]
+  created_at timestamp
+  updated_at timestamp
+  published_at timestamp
+
+  indexes {
+    slug
+    author_id
+    author_type_id
+    is_published
+    is_featured
+    status_id
+    created_at
+    published_at
+    locale
+    created_by_user_id
+  }
+}
+
+Table testimonials {
+  id uuid [pk]
+  client_name varchar(100) [not null]
+  client_role varchar(100)
+  client_company varchar(100)
+  client_avatar_url text
+  content text [not null]
+  rating smallint
+  is_published boolean [default: true]
+  sort_order smallint [default: 0]
+  project_id uuid [ref: > projects.id]
+  created_by_user_id uuid [ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    is_published
+    project_id
+    created_by_user_id
+  }
+}
+
+// Junction Tables
+Table projects_services {
+  id uuid [pk]
+  project_id uuid [ref: > projects.id, not null]
+  service_id uuid [ref: > services.id, not null]
+  created_at timestamp
+
+  indexes {
+    (project_id, service_id) [unique]
+    project_id
+    service_id
+  }
+}
+
+Table projects_tags {
+  id uuid [pk]
+  project_id uuid [ref: > projects.id, not null]
+  tag_id uuid [ref: > tags.id, not null]
+  created_at timestamp
+
+  indexes {
+    (project_id, tag_id) [unique]
+    project_id
+    tag_id
+  }
+}
+
+Table blog_posts_tags {
+  id uuid [pk]
+  blog_post_id uuid [ref: > blog_posts.id, not null]
+  tag_id uuid [ref: > tags.id, not null]
+  created_at timestamp
+
+  indexes {
+    (blog_post_id, tag_id) [unique]
+    blog_post_id
+    tag_id
+  }
+}
+
+// Contact Forms
+Table contact_submissions {
+  id uuid [pk]
+  name varchar(100) [not null]
+  email varchar(255) [not null]
+  phone varchar(20)
+  message text [not null]
+  company varchar(100)
+  service_interest uuid [ref: > services.id]
+  status_id uuid [ref: > submission_statuses.id, not null]
+  assigned_to_user_id uuid [ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+
+  indexes {
+    email
+    status_id
+    created_at
+    service_interest
+    assigned_to_user_id
+  }
+}
+
+// Activity Logs
+Table activity_logs {
+  id uuid [pk]
+  user_id uuid [ref: > users.id]
+  entity_type varchar(50) [not null, note: "blog_post, project, etc."]
+  entity_id uuid [not null]
+  action_type_id uuid [ref: > action_types.id, not null]
+  changes jsonb [note: "Stores old and new values"]
+  ip_address varchar(45)
+  user_agent text
+  created_at timestamp
+
+  indexes {
+    user_id
+    entity_type
+    entity_id
+    action_type_id
+    created_at
+  }
+}
+
+// Views (represented in DBML for documentation)
+// These would be implemented as SQL views in the actual database
+Table view_blog_posts {
+  id uuid
+  title varchar(100)
+  slug varchar(100)
+  summary text
+  content text
+  featured_image_url text
+  author_id uuid
+  author_type_id uuid
+  author_type varchar(20)
+  author_name text
+  meta_title varchar(100)
+  meta_description varchar(160)
+  is_published boolean
+  is_featured boolean
+  status_id uuid
+  status_name varchar(20)
+  status_description text
+  locale varchar(10)
+  reading_time smallint
+  structured_data jsonb
+  tags text[] [note: "Array of tag names"]
+  created_by_user_id uuid
+  creator_email varchar(255)
+  creator_name text
+  created_at timestamp
+  updated_at timestamp
+  published_at timestamp
+
+  [note: 'View that combines blog post data with readable author and tag information']
+}
+
+Table view_projects {
+  id uuid
+  title varchar(100)
+  slug varchar(100)
+  summary text
+  content text
+  client_name varchar(100)
+  completed_date date
+  featured_image_url text
+  gallery_images jsonb
+  meta_title varchar(100)
+  meta_description varchar(160)
+  is_published boolean
+  is_featured boolean
+  sort_order smallint
+  status_id uuid
+  status_name varchar(20)
+  status_description text
+  locale varchar(10)
+  structured_data jsonb
+  tags text[] [note: "Array of tag names"]
+  services text[] [note: "Array of service names"]
+  created_by_user_id uuid
+  creator_email varchar(255)
+  creator_name text
+  created_at timestamp
+  updated_at timestamp
+
+  [note: 'View that combines project data with readable status, tags and services information']
+}
+
+Table view_contact_submissions {
+  id uuid
+  name varchar(100)
+  email varchar(255)
+  phone varchar(20)
+  message text
+  company varchar(100)
+  service_interest uuid
+  service_name varchar(100)
+  status_id uuid
+  status_name varchar(20)
+  assigned_to_user_id uuid
+  assigned_to_name text
+  created_at timestamp
+  updated_at timestamp
+
+  [note: 'View that combines contact submission data with service and status information']
+}
+
+// Relationships (for visual clarity)
+// Many-to-many relationships
+Ref: projects.id <> services.id [through: projects_services]
+Ref: projects.id <> tags.id [through: projects_tags]
+Ref: blog_posts.id <> tags.id [through: blog_posts_tags] 
