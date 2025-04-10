@@ -23,14 +23,6 @@ Table submission_statuses {
   created_at timestamp
 }
 
-// Author type enum for polymorphic relationship
-Table author_types {
-  id uuid [pk]
-  name varchar(20) [unique, not null, note: "team_member"]
-  description text
-  created_at timestamp
-}
-
 // Action type enum for activity logs
 Table action_types {
   id uuid [pk]
@@ -153,8 +145,7 @@ Table blog_posts {
   summary text [not null]
   content text [not null]
   featured_image_url text
-  author_id uuid [note: "FK to team_members.id"]
-  author_type_id uuid [ref: > author_types.id, not null, note: "Always team_members"]
+  author_id uuid [ref: > team_members.id, not null]
   meta_title varchar(100)
   meta_description varchar(160)
   is_published boolean [default: true]
@@ -171,7 +162,6 @@ Table blog_posts {
   indexes {
     slug
     author_id
-    author_type_id
     is_published
     is_featured
     status_id
@@ -298,8 +288,6 @@ Table view_blog_posts {
   content text
   featured_image_url text
   author_id uuid
-  author_type_id uuid
-  author_type varchar(20)
   author_name text
   meta_title varchar(100)
   meta_description varchar(160)

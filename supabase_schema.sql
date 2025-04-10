@@ -31,18 +31,6 @@ INSERT INTO content_statuses (name, description) VALUES
   ('published', 'Content that is live and publicly visible'),
   ('archived', 'Content that has been removed from public view');
 
--- Author type enum table for polymorphic relationships (chỉ giữ team_member)
-CREATE TABLE author_types (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name VARCHAR(20) NOT NULL UNIQUE,
-  description TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Insert default author types (chỉ còn team_member)
-INSERT INTO author_types (name, description) VALUES
-  ('team_member', 'Author is a team member of the agency');
-
 -- Contact submission status enum table
 CREATE TABLE submission_statuses (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -206,8 +194,7 @@ CREATE TABLE blog_posts (
   summary TEXT NOT NULL,
   content TEXT NOT NULL,
   featured_image_url TEXT,
-  author_id UUID NOT NULL,
-  author_type_id UUID NOT NULL REFERENCES author_types(id) ON DELETE RESTRICT,
+  author_id UUID NOT NULL REFERENCES team_members(id) ON DELETE RESTRICT,
   meta_title VARCHAR(100),
   meta_description VARCHAR(160),
   is_published BOOLEAN DEFAULT true,
@@ -222,15 +209,8 @@ CREATE TABLE blog_posts (
   published_at TIMESTAMPTZ
 );
 
--- Sửa lại ràng buộc cho blog_posts để chỉ có team_member làm tác giả
-ALTER TABLE blog_posts ADD CONSTRAINT valid_author_reference CHECK (
-  author_type_id IN (SELECT id FROM author_types WHERE name = 'team_member') AND
-  author_id IN (SELECT id FROM team_members)
-);
-
 CREATE INDEX idx_blog_posts_slug ON blog_posts(slug);
 CREATE INDEX idx_blog_posts_author_id ON blog_posts(author_id);
-CREATE INDEX idx_blog_posts_author_type_id ON blog_posts(author_type_id);
 CREATE INDEX idx_blog_posts_is_published ON blog_posts(is_published);
 CREATE INDEX idx_blog_posts_is_featured ON blog_posts(is_featured);
 CREATE INDEX idx_blog_posts_status_id ON blog_posts(status_id);
@@ -378,7 +358,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- VIEW: Comprehensive Blog Posts View (cập nhật để chỉ hiển thị team_member)
+-- VIEW: Comprehensive Blog Posts View
 CREATE VIEW view_blog_posts AS
 SELECT 
   bp.id,
@@ -388,9 +368,7 @@ SELECT
   bp.content,
   bp.featured_image_url,
   bp.author_id,
-  bp.author_type_id,
-  at.name AS author_type,
-  (SELECT tm.name FROM team_members tm WHERE tm.id = bp.author_id) AS author_name,
+  tm.name AS author_name,
   bp.meta_title,
   bp.meta_description,
   bp.is_published,
@@ -413,7 +391,7 @@ FROM
 JOIN 
   content_statuses cs ON bp.status_id = cs.id
 JOIN 
-  author_types at ON bp.author_type_id = at.id
+  team_members tm ON bp.author_id = tm.id
 JOIN 
   users u ON bp.created_by_user_id = u.id;
 
