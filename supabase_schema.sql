@@ -252,6 +252,81 @@ CREATE INDEX idx_contact_submissions_created_at ON contact_submissions(created_a
 CREATE INDEX idx_contact_submissions_service_interest ON contact_submissions(service_interest);
 CREATE INDEX idx_contact_submissions_assigned_to ON contact_submissions(assigned_to_user_id);
 
+-- SITE_VISITS TABLE for tracking visitors
+CREATE TABLE site_visits (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  visitor_id VARCHAR(100) NOT NULL, -- Anonymous identifier (cookie or fingerprint)
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  referrer_url TEXT,
+  landing_page TEXT NOT NULL,
+  country VARCHAR(2),
+  region VARCHAR(100),
+  city VARCHAR(100),
+  browser VARCHAR(50),
+  browser_version VARCHAR(50),
+  os VARCHAR(50),
+  os_version VARCHAR(50),
+  device_type VARCHAR(20), -- 'mobile', 'tablet', 'desktop'
+  is_bot BOOLEAN DEFAULT false,
+  first_visit_at TIMESTAMPTZ DEFAULT NOW(),
+  last_visit_at TIMESTAMPTZ DEFAULT NOW(),
+  visit_count INTEGER DEFAULT 1,
+  utm_source VARCHAR(100),
+  utm_medium VARCHAR(100),
+  utm_campaign VARCHAR(100),
+  utm_term VARCHAR(100),
+  utm_content VARCHAR(100),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL, -- Only set if user is logged in
+  created_at TIMESTAMPTZ DEFAULT NOW()
+) PARTITION BY RANGE (first_visit_at);
+
+-- Create partitions for April and May 2025
+CREATE TABLE site_visits_202504 PARTITION OF site_visits
+    FOR VALUES FROM ('2025-04-01') TO ('2025-05-01');
+    
+CREATE TABLE site_visits_202505 PARTITION OF site_visits
+    FOR VALUES FROM ('2025-05-01') TO ('2025-06-01');
+
+-- Recreate indexes on the partitioned table
+CREATE INDEX idx_site_visits_visitor_id ON site_visits(visitor_id);
+CREATE INDEX idx_site_visits_ip_address ON site_visits(ip_address);
+CREATE INDEX idx_site_visits_first_visit_at ON site_visits(first_visit_at);
+CREATE INDEX idx_site_visits_last_visit_at ON site_visits(last_visit_at);
+CREATE INDEX idx_site_visits_country ON site_visits(country);
+CREATE INDEX idx_site_visits_device_type ON site_visits(device_type);
+CREATE INDEX idx_site_visits_user_id ON site_visits(user_id);
+CREATE INDEX idx_site_visits_utm_source ON site_visits(utm_source);
+
+-- PAGE_VIEWS TABLE for tracking individual page views
+CREATE TABLE page_views (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  visit_id UUID NOT NULL REFERENCES site_visits(id) ON DELETE CASCADE,
+  url_path TEXT NOT NULL,
+  page_title TEXT,
+  query_params JSONB,
+  hash_fragment TEXT,
+  time_on_page INTEGER, -- in seconds
+  exit_page BOOLEAN DEFAULT false,
+  previous_page_id UUID REFERENCES page_views(id) ON DELETE SET NULL,
+  events JSONB, -- Stores events triggered on the page (clicks, form submissions, etc.)
+  created_at TIMESTAMPTZ DEFAULT NOW()
+) PARTITION BY RANGE (created_at);
+
+-- Create partitions for April and May 2025
+CREATE TABLE page_views_202504 PARTITION OF page_views
+    FOR VALUES FROM ('2025-04-01') TO ('2025-05-01');
+    
+CREATE TABLE page_views_202505 PARTITION OF page_views
+    FOR VALUES FROM ('2025-05-01') TO ('2025-06-01');
+
+-- Recreate indexes on the partitioned table
+CREATE INDEX idx_page_views_visit_id ON page_views(visit_id);
+CREATE INDEX idx_page_views_url_path ON page_views(url_path);
+CREATE INDEX idx_page_views_created_at ON page_views(created_at);
+CREATE INDEX idx_page_views_exit_page ON page_views(exit_page);
+CREATE INDEX idx_page_views_time_on_page ON page_views(time_on_page);
+
 -- ACTIVITY LOGS TABLE for tracking content changes
 CREATE TABLE activity_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -263,8 +338,16 @@ CREATE TABLE activity_logs (
   ip_address VARCHAR(45),
   user_agent TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
-);
+) PARTITION BY RANGE (created_at);
 
+-- Create partitions for April and May 2025
+CREATE TABLE activity_logs_202504 PARTITION OF activity_logs
+    FOR VALUES FROM ('2025-04-01') TO ('2025-05-01');
+    
+CREATE TABLE activity_logs_202505 PARTITION OF activity_logs
+    FOR VALUES FROM ('2025-05-01') TO ('2025-06-01');
+
+-- Recreate indexes on the partitioned table
 CREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);
 CREATE INDEX idx_activity_logs_entity_type ON activity_logs(entity_type);
 CREATE INDEX idx_activity_logs_entity_id ON activity_logs(entity_id);
@@ -658,4 +741,182 @@ CREATE POLICY "Creators can update assigned submissions" ON contact_submissions
       JOIN user_roles r ON u.role_id = r.id
       WHERE u.id = auth.uid() AND r.name = 'creator'
     )
-  ); 
+  );
+
+-- Site visits and page views policies
+ALTER TABLE site_visits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Admins can view all site visits" ON site_visits
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM users u
+      JOIN user_roles r ON u.role_id = r.id
+      WHERE u.id = auth.uid() AND r.name = 'admin'
+    )
+  );
+
+ALTER TABLE page_views ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Admins can view all page views" ON page_views
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM users u
+      JOIN user_roles r ON u.role_id = r.id
+      WHERE u.id = auth.uid() AND r.name = 'admin'
+    )
+  );
+
+-- Function to aggregate page_views data for analytics
+CREATE OR REPLACE FUNCTION get_daily_page_views(start_date DATE, end_date DATE)
+RETURNS TABLE (
+  date DATE,
+  url_path TEXT,
+  view_count BIGINT,
+  avg_time_on_page NUMERIC
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    DATE(pv.created_at) AS date,
+    pv.url_path,
+    COUNT(*) AS view_count,
+    AVG(pv.time_on_page)::NUMERIC AS avg_time_on_page
+  FROM 
+    page_views pv
+  WHERE 
+    DATE(pv.created_at) BETWEEN start_date AND end_date
+  GROUP BY 
+    DATE(pv.created_at),
+    pv.url_path
+  ORDER BY 
+    date DESC, 
+    view_count DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to get visitor statistics
+CREATE OR REPLACE FUNCTION get_visitor_stats(start_date DATE, end_date DATE)
+RETURNS TABLE (
+  date DATE,
+  new_visitors BIGINT,
+  returning_visitors BIGINT,
+  total_visitors BIGINT,
+  mobile_count BIGINT,
+  tablet_count BIGINT,
+  desktop_count BIGINT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    DATE(sv.created_at) AS date,
+    COUNT(*) FILTER (WHERE sv.visit_count = 1) AS new_visitors,
+    COUNT(*) FILTER (WHERE sv.visit_count > 1) AS returning_visitors,
+    COUNT(*) AS total_visitors,
+    COUNT(*) FILTER (WHERE sv.device_type = 'mobile') AS mobile_count,
+    COUNT(*) FILTER (WHERE sv.device_type = 'tablet') AS tablet_count,
+    COUNT(*) FILTER (WHERE sv.device_type = 'desktop') AS desktop_count
+  FROM 
+    site_visits sv
+  WHERE 
+    DATE(sv.created_at) BETWEEN start_date AND end_date
+  GROUP BY 
+    DATE(sv.created_at)
+  ORDER BY 
+    date DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to update the last_visit_at timestamp for site_visits
+CREATE OR REPLACE FUNCTION update_site_visit()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.last_visit_at = NOW();
+    NEW.visit_count = OLD.visit_count + 1;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_site_visit_timestamp
+  BEFORE UPDATE ON site_visits
+  FOR EACH ROW
+  EXECUTE PROCEDURE update_site_visit(); 
+
+-- Function to create monthly partitions for all partitioned tables
+CREATE OR REPLACE FUNCTION create_monthly_partitions(
+  months_ahead INTEGER DEFAULT 3
+)
+RETURNS void AS $$
+DECLARE
+  partition_date DATE;
+  partition_start DATE;
+  partition_end DATE;
+  partition_name TEXT;
+  current_month DATE := DATE_TRUNC('month', CURRENT_DATE);
+BEGIN
+  -- Loop through the specified number of months ahead
+  FOR i IN 0..months_ahead LOOP
+    -- Calculate the partition date (current month + i months)
+    partition_date := current_month + (i || ' months')::INTERVAL;
+    partition_start := DATE_TRUNC('month', partition_date);
+    partition_end := partition_start + '1 month'::INTERVAL;
+    
+    -- Format for partition name: tablename_YYYYMM
+    partition_name := TO_CHAR(partition_date, 'YYYYMM');
+    
+    -- Create site_visits partition if it doesn't exist
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = 'site_visits_' || partition_name
+    ) THEN
+      EXECUTE format(
+        'CREATE TABLE site_visits_%s PARTITION OF site_visits
+         FOR VALUES FROM (%L) TO (%L)',
+        partition_name, partition_start, partition_end
+      );
+      RAISE NOTICE 'Created partition site_visits_%', partition_name;
+    END IF;
+    
+    -- Create page_views partition if it doesn't exist
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = 'page_views_' || partition_name
+    ) THEN
+      EXECUTE format(
+        'CREATE TABLE page_views_%s PARTITION OF page_views
+         FOR VALUES FROM (%L) TO (%L)',
+        partition_name, partition_start, partition_end
+      );
+      RAISE NOTICE 'Created partition page_views_%', partition_name;
+    END IF;
+    
+    -- Create activity_logs partition if it doesn't exist
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relname = 'activity_logs_' || partition_name
+    ) THEN
+      EXECUTE format(
+        'CREATE TABLE activity_logs_%s PARTITION OF activity_logs
+         FOR VALUES FROM (%L) TO (%L)',
+        partition_name, partition_start, partition_end
+      );
+      RAISE NOTICE 'Created partition activity_logs_%', partition_name;
+    END IF;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Example usage: Create partitions for the next 3 months (default)
+-- SELECT create_monthly_partitions();
+
+-- Example: Create partitions for the next 6 months
+-- SELECT create_monthly_partitions(6);
+
+-- Note: This function can be scheduled to run monthly using pg_cron extension:
+-- Run this if you have pg_cron extension installed:
+-- 
+-- SELECT cron.schedule(
+--   'monthly-partition-creation',
+--   '0 0 1 * *',  -- At midnight on the 1st of every month
+--   $$SELECT create_monthly_partitions(3)$$
+-- ); 

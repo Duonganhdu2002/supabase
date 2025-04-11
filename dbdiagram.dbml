@@ -256,6 +256,66 @@ Table activity_logs {
   }
 }
 
+// Analytics Tables
+Table site_visits {
+  id uuid [pk]
+  visitor_id varchar(100) [not null, note: "Anonymous identifier (cookie/fingerprint)"]
+  ip_address varchar(45)
+  user_agent text
+  referrer_url text
+  landing_page text [not null]
+  country varchar(2)
+  region varchar(100)
+  city varchar(100)
+  browser varchar(50)
+  browser_version varchar(50)
+  os varchar(50)
+  os_version varchar(50)
+  device_type varchar(20) [note: "mobile, tablet, desktop"]
+  is_bot boolean [default: false]
+  first_visit_at timestamp
+  last_visit_at timestamp
+  visit_count integer [default: 1]
+  utm_source varchar(100)
+  utm_medium varchar(100)
+  utm_campaign varchar(100)
+  utm_term varchar(100)
+  utm_content varchar(100)
+  user_id uuid [ref: > users.id]
+  created_at timestamp
+
+  indexes {
+    visitor_id
+    ip_address
+    first_visit_at
+    last_visit_at
+    country
+    device_type
+    user_id
+  }
+}
+
+Table page_views {
+  id uuid [pk]
+  visit_id uuid [ref: > site_visits.id, not null]
+  url_path text [not null]
+  page_title text
+  query_params jsonb
+  hash_fragment text
+  time_on_page integer [note: "in seconds"]
+  exit_page boolean [default: false]
+  previous_page_id uuid [ref: > page_views.id]
+  events jsonb [note: "Clicks, form submissions, etc."]
+  created_at timestamp
+
+  indexes {
+    visit_id
+    url_path
+    created_at
+    exit_page
+  }
+}
+
 // Views (represented in DBML for documentation)
 // These would be implemented as SQL views in the actual database
 Table view_blog_posts {
@@ -338,8 +398,33 @@ Table view_contact_submissions {
   [note: 'View that combines contact submission data with service and status information']
 }
 
+// Analytics Views for Documentation
+Table view_daily_page_views {
+  date date
+  url_path text
+  view_count bigint
+  avg_time_on_page numeric
+
+  [note: 'View for daily page view metrics']
+}
+
+Table view_visitor_stats {
+  date date
+  new_visitors bigint
+  returning_visitors bigint
+  total_visitors bigint
+  mobile_count bigint
+  tablet_count bigint
+  desktop_count bigint
+
+  [note: 'View for daily visitor statistics']
+}
+
 // Relationships (for visual clarity)
 // Many-to-many relationships
 Ref: projects.id <> services.id [through: projects_services]
 Ref: projects.id <> tags.id [through: projects_tags]
-Ref: blog_posts.id <> tags.id [through: blog_posts_tags] 
+Ref: blog_posts.id <> tags.id [through: blog_posts_tags]
+
+// Analytics relationships
+Ref: page_views.visit_id > site_visits.id 
