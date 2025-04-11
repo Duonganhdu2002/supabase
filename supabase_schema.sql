@@ -231,27 +231,6 @@ CREATE TABLE blog_posts_tags (
 CREATE INDEX idx_blog_posts_tags_blog_post_id ON blog_posts_tags(blog_post_id);
 CREATE INDEX idx_blog_posts_tags_tag_id ON blog_posts_tags(tag_id);
 
--- TESTIMONIALS TABLE
-CREATE TABLE testimonials (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  client_name VARCHAR(100) NOT NULL,
-  client_role VARCHAR(100),
-  client_company VARCHAR(100),
-  client_avatar_url TEXT,
-  content TEXT NOT NULL,
-  rating SMALLINT CHECK (rating >= 1 AND rating <= 5),
-  is_published BOOLEAN DEFAULT true,
-  sort_order SMALLINT DEFAULT 0,
-  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-  created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_testimonials_is_published ON testimonials(is_published);
-CREATE INDEX idx_testimonials_project_id ON testimonials(project_id);
-CREATE INDEX idx_testimonials_created_by ON testimonials(created_by_user_id);
-
 -- CONTACT SUBMISSIONS TABLE (duy nhất bảng này người dùng thông thường có thể tương tác)
 CREATE TABLE contact_submissions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -569,11 +548,6 @@ CREATE TRIGGER update_blog_posts_modtime
   FOR EACH ROW
   EXECUTE PROCEDURE update_modified_column();
 
-CREATE TRIGGER update_testimonials_modtime
-  BEFORE UPDATE ON testimonials
-  FOR EACH ROW
-  EXECUTE PROCEDURE update_modified_column();
-
 CREATE TRIGGER update_contact_submissions_modtime
   BEFORE UPDATE ON contact_submissions
   FOR EACH ROW
@@ -683,20 +657,5 @@ CREATE POLICY "Creators can update assigned submissions" ON contact_submissions
       SELECT 1 FROM users u
       JOIN user_roles r ON u.role_id = r.id
       WHERE u.id = auth.uid() AND r.name = 'creator'
-    )
-  );
-
--- Testimonials policies
-ALTER TABLE testimonials ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Anyone can view published testimonials" ON testimonials
-  FOR SELECT USING (is_published = true);
-CREATE POLICY "Creators can manage their own testimonials" ON testimonials
-  FOR ALL USING (created_by_user_id = auth.uid());
-CREATE POLICY "Admins can manage all testimonials" ON testimonials
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM users u
-      JOIN user_roles r ON u.role_id = r.id
-      WHERE u.id = auth.uid() AND r.name = 'admin'
     )
   ); 

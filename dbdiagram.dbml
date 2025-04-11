@@ -172,28 +172,6 @@ Table blog_posts {
   }
 }
 
-Table testimonials {
-  id uuid [pk]
-  client_name varchar(100) [not null]
-  client_role varchar(100)
-  client_company varchar(100)
-  client_avatar_url text
-  content text [not null]
-  rating smallint
-  is_published boolean [default: true]
-  sort_order smallint [default: 0]
-  project_id uuid [ref: > projects.id]
-  created_by_user_id uuid [ref: > users.id]
-  created_at timestamp
-  updated_at timestamp
-
-  indexes {
-    is_published
-    project_id
-    created_by_user_id
-  }
-}
-
 // Junction Tables
 Table projects_services {
   id uuid [pk]
